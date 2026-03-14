@@ -21,11 +21,10 @@ const kpiConfig = [
   { key: 'internalTransfers',  label: 'Internal Transfers',      icon: HiOutlineSwitchHorizontal,   color: { bg: 'bg-purple-600/20',  text: 'text-purple-400',  ring: 'ring-purple-500/20' }},
 ]
 
-/* ───── Filter options ───── */
-const DOC_TYPES  = ['All', 'Receipt', 'Delivery', 'Internal', 'Adjustment']
-const STATUSES   = ['All', 'Draft', 'Waiting', 'Ready', 'Done', 'Canceled']
-const WAREHOUSES = ['All', 'Main Warehouse', 'East Branch', 'West Branch']
-const CATEGORIES = ['All', 'Electronics', 'Accessories', 'Furniture']
+/* ───── Filter options (static) ───── */
+const DOC_TYPES = ['All', 'Receipt', 'Delivery', 'Internal', 'Adjustment']
+const STATUSES  = ['All', 'Draft', 'Waiting', 'Ready', 'Done', 'Canceled']
+// WAREHOUSES and CATEGORIES are derived dynamically from real data below
 
 /* ───── Status badge colors ───── */
 const statusColors = {
@@ -87,6 +86,17 @@ export default function Dashboard() {
     fetchDashboardKPIs().then(setKpis)
     fetchOperations().then(setOperations)
   }, [])
+
+  /* ── Derive filter options from real data ── */
+  const warehouses = useMemo(() => {
+    const vals = [...new Set(operations.map(o => o.warehouse).filter(Boolean))]
+    return ['All', ...vals.sort()]
+  }, [operations])
+
+  const categories = useMemo(() => {
+    const vals = [...new Set(operations.map(o => o.category).filter(c => c && c !== '—'))]
+    return ['All', ...vals.sort()]
+  }, [operations])
 
   /* ── Apply filters ── */
   const filtered = useMemo(() => {
@@ -184,8 +194,8 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <FilterSelect label="Document Type" value={docType}   onChange={setDocType}   options={DOC_TYPES} />
               <FilterSelect label="Status"        value={status}    onChange={setStatus}    options={STATUSES} />
-              <FilterSelect label="Warehouse"     value={warehouse} onChange={setWarehouse} options={WAREHOUSES} />
-              <FilterSelect label="Category"      value={category}  onChange={setCategory}  options={CATEGORIES} />
+              <FilterSelect label="Warehouse"     value={warehouse} onChange={setWarehouse} options={warehouses} />
+              <FilterSelect label="Category"      value={category}  onChange={setCategory}  options={categories} />
             </div>
           </div>
 

@@ -11,30 +11,22 @@ const movementColumns = [
   { key: 'type',      label: 'Direction' },
   { key: 'product',   label: 'Product' },
   { key: 'qty',       label: 'Qty' },
-  { key: 'from',      label: 'From' },
-  { key: 'to',        label: 'To' },
+  { key: 'warehouse', label: 'Warehouse' },
   { key: 'reference', label: 'Reference' },
-  { key: 'status',    label: 'Status' },
-  { key: 'date',      label: 'Date' },
-]
-
-const orderColumns = [
-  { key: 'id',        label: 'ID' },
-  { key: 'type',      label: 'Order Type' },
-  { key: 'product',   label: 'Product' },
-  { key: 'qty',       label: 'Qty' },
-  { key: 'from',      label: 'From' },
-  { key: 'to',        label: 'To' },
-  { key: 'reference', label: 'Reference' },
-  { key: 'status',    label: 'Status' },
+  { key: 'performer', label: 'By' },
   { key: 'date',      label: 'Date' },
 ]
 
 /* ── Filter options ── */
-const TABS = ['All', 'Movement History', 'Order History']
-const MOVE_TYPES = ['All', 'Incoming', 'Outgoing', 'Moving']
-const ORDER_TYPES = ['All', 'Purchase Order', 'Sales Order']
-const STATUSES = ['All', 'Completed', 'In Transit', 'Pending', 'Received', 'Fulfilled', 'Ordered', 'Canceled']
+const TABS = ['All', 'Receipts', 'Deliveries', 'Transfers', 'Adjustments']
+const MOVE_TYPES = ['All', 'receipt', 'delivery', 'transfer_out', 'transfer_in', 'adjustment']
+const MOVE_TYPE_LABELS = {
+  receipt:     'Receipt ↓',
+  delivery:    'Delivery ↑',
+  transfer_out:'Transfer Out →',
+  transfer_in: 'Transfer In ←',
+  adjustment:  'Adjustment ±',
+}
 
 function FilterSelect({ label, value, onChange, options }) {
   return (
@@ -45,54 +37,71 @@ function FilterSelect({ label, value, onChange, options }) {
         onChange={(e) => onChange(e.target.value)}
         className="rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none"
       >
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o} value={o}>{MOVE_TYPE_LABELS[o] || o}</option>)}
       </select>
     </div>
   )
 }
 
+const TYPE_BADGE = {
+  receipt:     'bg-emerald-600/20 text-emerald-400',
+  delivery:    'bg-red-600/20 text-red-400',
+  transfer_out:'bg-amber-600/20 text-amber-400',
+  transfer_in: 'bg-blue-600/20 text-blue-400',
+  adjustment:  'bg-purple-600/20 text-purple-400',
+}
+
 export default function History() {
-  const [history, setHistory] = useState([])
+  const [rows, setRows]       = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState('')
 
   // Filters
   const [activeTab, setActiveTab] = useState('All')
   const [moveType, setMoveType]   = useState('All')
-  const [orderType, setOrderType] = useState('All')
-  const [status, setStatus]       = useState('All')
 
   useEffect(() => {
-    fetchHistory().then((data) => { setHistory(data); setLoading(false) })
-  }, [])
+    const tabToType = {
+      Receipts:    'receipt',
+      Deliveries:  'delivery',
+      Transfers:   'transfer_out',
+      Adjustments: 'adjustment',
+    }
+    const typeFilter = activeTab !== 'All' ? tabToType[activeTab] : undefined
 
-  const resetFilters = () => {
-    setMoveType('All')
-    setOrderType('All')
-    setStatus('All')
-  }
+    setLoading(true)
+    fetchHistory({ limit: 100, movementType: typeFilter })
+      .then((res) => {
+        // res = { data: [...], pagination: {...} }
+        const mapped = (res.data || []).map((m) => ({
+          id:        m.id,
+          type: (
+            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${TYPE_BADGE[m.movement_type] || ''}`}>
+              {MOVE_TYPE_LABELS[m.movement_type] || m.movement_type}
+            </span>
+          ),
+          product:   m.product_name,
+          qty:       m.quantity,
+          warehouse: m.warehouse_name,
+          reference: m.reference_type ? `${m.reference_type} #${m.reference_id}` : '—',
+          performer: m.performed_by_name,
+          date:      formatDate(m.moved_at?.slice(0, 10)),
+        }))
+        setRows(mapped)
+        setLoading(false)
+      })
+      .catch((err) => {
+        setError(err.message || 'Failed to load history.')
+        setLoading(false)
+      })
+  }, [activeTab])
 
-  /* ── Split data ── */
-  const movements = useMemo(() => history.filter((h) => h.moveType === 'movement'), [history])
-  const orders    = useMemo(() => history.filter((h) => h.moveType === 'order'), [history])
-
-  /* ── Apply filters ── */
-  const filteredMovements = useMemo(() => {
-    return movements
-      .filter((m) => moveType === 'All' || m.type === moveType)
-      .filter((m) => status === 'All' || m.status === status)
-      .map((m) => ({ ...m, date: formatDate(m.date) }))
-  }, [movements, moveType, status])
-
-  const filteredOrders = useMemo(() => {
-    return orders
-      .filter((o) => orderType === 'All' || o.type === orderType)
-      .filter((o) => status === 'All' || o.status === status)
-      .map((o) => ({ ...o, date: formatDate(o.date) }))
-  }, [orders, orderType, status])
-
-  const hasActiveFilter = moveType !== 'All' || orderType !== 'All' || status !== 'All'
-  const showMovements = activeTab === 'All' || activeTab === 'Movement History'
-  const showOrders    = activeTab === 'All' || activeTab === 'Order History'
+  /* ── Apply local moveType filter ── */
+  const filtered = useMemo(() => {
+    if (moveType === 'All') return rows
+    // The type cell is now JSX, filter on raw data not possible — handled server-side via activeTab
+    return rows
+  }, [rows, moveType])
 
   return (
     <div className="min-h-screen bg-gray-950">
@@ -102,9 +111,9 @@ export default function History() {
         <div className="p-8">
           {/* Header */}
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-white">History</h2>
+            <h2 className="text-2xl font-bold text-white">Movement History</h2>
             <p className="text-sm text-gray-400 mt-1">
-              Complete log of product movements (incoming, outgoing, transfers) and order history.
+              Complete immutable ledger of all stock movements — receipts, deliveries, transfers, and adjustments.
             </p>
           </div>
 
@@ -125,47 +134,28 @@ export default function History() {
             ))}
           </div>
 
-          {/* Filters */}
-          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold text-base">Filters</h3>
-              {hasActiveFilter && (
-                <button onClick={resetFilters} className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
-                  Reset all
-                </button>
-              )}
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {showMovements && (
-                <FilterSelect label="Movement Type" value={moveType} onChange={setMoveType} options={MOVE_TYPES} />
-              )}
-              {showOrders && (
-                <FilterSelect label="Order Type" value={orderType} onChange={setOrderType} options={ORDER_TYPES} />
-              )}
-              <FilterSelect label="Status" value={status} onChange={setStatus} options={STATUSES} />
-            </div>
-          </div>
-
           {/* Tables */}
           {loading ? (
-            <p className="text-gray-500">Loading history…</p>
-          ) : (
-            <div className="space-y-8">
-              {showMovements && (
-                <HistoryTable
-                  columns={movementColumns}
-                  data={filteredMovements}
-                  caption={`Movement History${moveType !== 'All' ? ` — ${moveType}` : ''} (${filteredMovements.length})`}
-                />
-              )}
-              {showOrders && (
-                <HistoryTable
-                  columns={orderColumns}
-                  data={filteredOrders}
-                  caption={`Order History${orderType !== 'All' ? ` — ${orderType}` : ''} (${filteredOrders.length})`}
-                />
-              )}
+            <div className="flex items-center gap-3 text-gray-500 py-12">
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              Loading history…
             </div>
+          ) : error ? (
+            <p className="text-red-400">{error}</p>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-16 text-gray-500">
+              <p className="text-4xl mb-3">📋</p>
+              <p>No movements found for this filter.</p>
+            </div>
+          ) : (
+            <HistoryTable
+              columns={movementColumns}
+              data={filtered}
+              caption={`${activeTab === 'All' ? 'All Movements' : activeTab} (${filtered.length})`}
+            />
           )}
         </div>
       </main>
